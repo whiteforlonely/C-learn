@@ -12,6 +12,8 @@
 #include <graphics.h>
 #include <conio.h>
 #include <malloc.h>
+#include <windows.h>
+#include <process.h>
 
 #define UP				72
 #define DOWN			80
@@ -33,9 +35,11 @@
 #define MODULE_TYPE_REL		6
 #define MODULE_TYPE_T		7
 
-#define WINDOW_WIDTH		640	// 游戏界面的宽
+#define WINDOW_WIDTH		250	// 游戏界面的宽
 #define WINDOW_HIGH			480 // 游戏界面的高
 
+#define arraySizeRaw		20
+#define arraySizeColumn		10
 
 typedef struct
 {
@@ -51,6 +55,10 @@ typedef struct
 	int bottom;	// 所占据矩形空间底部位置
 } ModuleCube;
 
+ModuleCube* currModuleCube;
+
+bool checkCanRotate(ModuleCube* moduleCube, int map[][arraySizeRaw]);
+
 /*
 画小方块
 x,y 为小方块的中心坐标
@@ -62,9 +70,596 @@ void drawCube(int x, int y)
 	fillrectangle(x - CUBE_WIDTH / 2, y - CUBE_WIDTH / 2, x + CUBE_WIDTH / 2, y + CUBE_WIDTH / 2);
 }
 
+/*
+清除一小个方块
+*/
 void clearCube(int x, int y)
 {
 	clearrectangle(x - CUBE_WIDTH / 2, y - CUBE_WIDTH / 2, x + CUBE_WIDTH / 2, y + CUBE_WIDTH / 2);
+}
+
+/*
+更新模块地图
+1：可以正常继续跑下去
+0：需要生成下一个模块
+-1： 游戏结束
+*/
+int updateMap(ModuleCube* moduleCube, int map[][arraySizeRaw])
+{
+	int x = moduleCube->left / CUBE_WIDTH;
+	int y = moduleCube->top / CUBE_WIDTH;
+
+	bool canGoOn = 0;
+
+	if (moduleCube->type == MODULE_TYPE_SQUARE)
+	{
+		map[x][y] = 1;
+		map[x + 1][y] = 1;
+		map[x][y + 1] = 1;
+		map[x + 1][y + 1] = 1;
+		canGoOn = map[x][y + 2] == 0 && map[x + 1][y + 2] == 0;
+		
+	}
+	else if (moduleCube->type == MODULE_TYPE_ONE)
+	{
+		if (moduleCube->direction == DIRECTION_0 || moduleCube->direction == DIRECTION_180)
+		{
+			map[x][y] = 1;
+			map[x + 1][y] = 1;
+			map[x + 2][y] = 1;
+			map[x + 3][y] = 1;
+			canGoOn = map[x][y + 1] == 0 && map[x + 1][y + 1] == 0 && map[x + 2][y + 1] == 0 && map[x + 3][y + 1] == 0;
+		}
+		else if (moduleCube->direction == DIRECTION_90 || moduleCube->direction == DIRECTION_270)
+		{
+			map[x][y] = 1;
+			map[x][y+1] = 1;
+			map[x][y+2] = 1;
+			map[x][y+3] = 1;
+			canGoOn = map[x][y + 4] == 0;
+		}
+	}
+	else if (moduleCube->type == MODULE_TYPE_L)
+	{
+		if (moduleCube->direction == DIRECTION_0)
+		{
+			map[x][y] = 1;
+			map[x][y + 1] = 1;
+			map[x][y + 2] = 1;
+			map[x + 1][y + 2] = 1;
+			canGoOn = map[x][y + 3] == 0 && map[x + 1][y + 3] == 0;
+		}
+		else if (moduleCube->direction == DIRECTION_90)
+		{
+			map[x][y] = 1;
+			map[x][y + 1] = 1;
+			map[x + 1][y] = 1;
+			map[x + 2][y] = 1;
+			canGoOn = map[x][y + 2] == 0 && map[x + 1][y + 1] == 0 && map[x + 2][y + 1] == 0;
+		}
+		else if (moduleCube->direction == DIRECTION_180)
+		{
+			map[x][y] = 1;
+			map[x + 1][y] = 1;
+			map[x + 1][y + 1] = 1;
+			map[x + 1][y + 2] = 1;
+			canGoOn = map[x][y + 1] == 0 && map[x + 1][y + 3] == 0;
+		}
+		else if (moduleCube->direction == DIRECTION_270)
+		{
+			map[x][y + 1] = 1;
+			map[x + 1][y + 1] = 1;
+			map[x + 2][y + 1] = 1;
+			map[x + 2][y] = 1;
+			canGoOn = map[x][y + 2] == 0 && map[x + 1][y + 2] == 0 && map[x + 2][y + 2] == 0;
+		}
+	}
+	else if (moduleCube->type == MODULE_TYPE_REL)
+	{
+		if (moduleCube->direction == DIRECTION_0)
+		{
+			map[x+1][y] = 1;
+			map[x+1][y + 1] = 1;
+			map[x+1][y + 2] = 1;
+			map[x][y + 2] = 1;
+			canGoOn = map[x][y + 3] == 0 && map[x + 1][y + 3] == 0;
+		}
+		else if (moduleCube->direction == DIRECTION_90)
+		{
+			map[x][y] = 1;
+			map[x][y + 1] = 1;
+			map[x + 1][y+1] = 1;
+			map[x + 2][y+1] = 1;
+			canGoOn = map[x][y + 2] == 0 && map[x + 1][y + 2] == 0 && map[x + 2][y + 2] == 0;
+		}
+		else if (moduleCube->direction == DIRECTION_180)
+		{
+			map[x][y] = 1;
+			map[x][y+1] = 1;
+			map[x][y + 2] = 1;
+			map[x + 1][y] = 1;
+			canGoOn = map[x][y + 3] == 0 && map[x + 1][y +1] == 0;
+		}
+		else if (moduleCube->direction == DIRECTION_270)
+		{
+			map[x][y] = 1;
+			map[x + 1][y] = 1;
+			map[x + 2][y] = 1;
+			map[x + 2][y + 1] = 1;
+			canGoOn = map[x][y + 1] == 0 && map[x + 1][y + 1] == 0 && map[x + 2][y + 2] == 0;
+		}
+	}
+	else if (moduleCube->type == MODULE_TYPE_STEP)
+	{
+		
+		if (moduleCube->direction == DIRECTION_90 || moduleCube->direction == DIRECTION_270)
+		{
+			map[x][y] = 1;
+			map[x][y + 1] = 1;
+			map[x + 1][y + 1] = 1;
+			map[x + 1][y + 2] = 1;
+			canGoOn = map[x][y + 2] == 0 && map[x + 1][y + 3] == 0;
+		}
+		else if (moduleCube->direction == DIRECTION_0 || moduleCube->direction == DIRECTION_180)
+		{
+			map[x+1][y] = 1;
+			map[x + 2][y] = 1;
+			map[x][y + 1] = 1;
+			map[x + 1][y + 1] = 1;
+			canGoOn = map[x][y + 2] == 0 && map[x + 1][y + 2] == 0 && map[x + 2][y + 1] == 0;
+		}
+	}
+	else if (moduleCube->type == MODULE_TYPE_RESTEP)
+	{
+
+		if (moduleCube->direction == DIRECTION_90 || moduleCube->direction == DIRECTION_270)
+		{
+			map[x][y+2] = 1;
+			map[x][y + 1] = 1;
+			map[x + 1][y + 1] = 1;
+			map[x + 1][y] = 1;
+			canGoOn = map[x][y + 3] == 0 && map[x + 1][y +2] == 0;
+		}
+		else if (moduleCube->direction == DIRECTION_0 || moduleCube->direction == DIRECTION_180)
+		{
+			map[x + 1][y] = 1;
+			map[x][y] = 1;
+			map[x+2][y + 1] = 1;
+			map[x + 1][y + 1] = 1;
+			canGoOn = map[x][y + 1] == 0 && map[x + 1][y + 2] == 0 && map[x + 2][y + 2] == 0;
+		}
+	}
+	else if (moduleCube->type == MODULE_TYPE_T)
+	{
+		if (moduleCube->direction == DIRECTION_0)
+		{
+			map[x][y] = 1;
+			map[x + 1][y] = 1;
+			map[x + 2][y] = 1;
+			map[x + 1][y + 1] = 1;
+			canGoOn = map[x][y + 1] == 0 && map[x + 1][y + 2] == 0 && map[x + 2][y + 1] == 0;
+		}
+		else if (moduleCube->direction == DIRECTION_90) {
+			map[x][y + 1] = 1;
+			map[x + 1][y] = 1;
+			map[x + 1][y + 1] = 1;
+			map[x + 1][y + 2] = 1;
+			canGoOn = map[x][y + 2] == 0 && map[x + 1][y + 3] == 0;
+		}
+		else if (moduleCube->direction == DIRECTION_180)
+		{
+			map[x + 1][y] = 1;
+			map[x][y + 1] = 1;
+			map[x + 1][y + 1] = 1;
+			map[x + 2][y + 1] = 1;
+			canGoOn = map[x][y + 2] == 0 && map[x + 1][y + 2] == 0 && map[x + 2][y + 2] == 0;
+		}
+		else if (moduleCube->direction == DIRECTION_270)
+		{
+			map[x][y] = 1;
+			map[x][y + 1] = 1;
+			map[x][y + 2] = 1;
+			map[x + 1][y + 1] = 1;
+			canGoOn = map[x][y + 3] == 0 && map[x + 1][y + 2] == 0;
+		}
+	}
+
+	// 最后判断下游戏是否继续
+	if (canGoOn)
+	{
+		if (moduleCube->bottom >= arraySizeRaw * CUBE_WIDTH)
+		{
+			return 0;
+		}
+		// 可以继续往下走
+		return 1;
+	}
+	else if (y == 1) {
+		// 不可以继续往下走，并且已经到达顶部了，游戏结束
+		return -1;
+	}
+	else {
+		// 需要重新生成另外一个模块
+		return 0;
+	}
+}
+
+bool checkCanMove(ModuleCube* moduleCube, int map[][arraySizeRaw], int directionKey) {
+	int x = moduleCube->left / CUBE_WIDTH;
+	int y = moduleCube->top / CUBE_WIDTH;
+	bool canGoOn = 1;
+	if (directionKey == LEFT)
+	{
+		if (x <= 0)
+		{
+			return 0;
+		}
+
+		if (moduleCube->type == MODULE_TYPE_SQUARE)
+		{
+			canGoOn = map[x - 1][y] == 0 && map[x - 1][y + 1] == 0;
+
+		}
+		else if (moduleCube->type == MODULE_TYPE_ONE)
+		{
+			if (moduleCube->direction == DIRECTION_0 || moduleCube->direction == DIRECTION_180)
+			{
+				canGoOn = map[x - 1][y] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_90 || moduleCube->direction == DIRECTION_270)
+			{
+				canGoOn = map[x - 1][y] == 0 && map[x - 1][y + 1] == 0 && map[x - 1][y + 2] == 0 && map[x - 1][y + 3] == 0;
+			}
+		}
+		else if (moduleCube->type == MODULE_TYPE_L)
+		{
+			if (moduleCube->direction == DIRECTION_0)
+			{
+				canGoOn = map[x - 1][y] == 0 && map[x - 1][y + 1] == 0 && map[x - 1][y + 2] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_90)
+			{
+				canGoOn = map[x - 1][y] == 0 && map[x - 1][y + 1] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_180)
+			{
+				canGoOn = map[x - 1][y] == 0 && map[x][y + 1] == 0 && map[x][y + 2] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_270)
+			{
+				canGoOn = map[x + 1][y] == 0 && map[x - 1][y + 1] == 0;
+			}
+		}
+		else if (moduleCube->type == MODULE_TYPE_REL)
+		{
+			if (moduleCube->direction == DIRECTION_0)
+			{
+				canGoOn = map[x][y] == 0 && map[x][y + 1] == 0 && map[x - 1][y + 2] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_90)
+			{
+				canGoOn = map[x - 1][y] == 0 && map[x - 1][y + 1] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_180)
+			{
+				canGoOn = map[x - 1][y] == 0 && map[x - 1][y + 1] == 0 && map[x - 1][y + 2] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_270)
+			{
+				canGoOn = map[x - 1][y] == 0 && map[x + 1][y + 1] == 0;
+			}
+		}
+		else if (moduleCube->type == MODULE_TYPE_STEP)
+		{
+
+			if (moduleCube->direction == DIRECTION_90 || moduleCube->direction == DIRECTION_270)
+			{
+				canGoOn = map[x - 1][y] == 0 && map[x - 1][y + 1] == 0 && map[x][y + 2] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_0 || moduleCube->direction == DIRECTION_180)
+			{
+				canGoOn = map[x][y] == 0 && map[x - 1][y + 1] == 0;
+			}
+		}
+		else if (moduleCube->type == MODULE_TYPE_RESTEP)
+		{
+			if (moduleCube->direction == DIRECTION_90 || moduleCube->direction == DIRECTION_270)
+			{
+				canGoOn = map[x][y] == 0 && map[x - 1][y + 1] == 0 && map[x - 1][y + 2] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_0 || moduleCube->direction == DIRECTION_180)
+			{
+				canGoOn = map[x - 1][y] == 0 && map[x][y + 1] == 0;
+			}
+		}
+		else if (moduleCube->type == MODULE_TYPE_T)
+		{
+			if (moduleCube->direction == DIRECTION_0)
+			{
+				canGoOn = map[x - 1][y] == 0 && map[x][y + 1] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_90)
+			{
+				canGoOn = map[x][y] == 0 && map[x - 1][y + 1] == 0 && map[x][y + 2] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_180)
+			{
+				canGoOn = map[x][y] == 0 && map[x - 1][y + 1] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_270)
+			{
+				canGoOn = map[x - 1][y] == 0 && map[x - 1][y + 1] && map[x - 1][y + 2] == 0;
+			}
+		}
+	}
+	// 向右移动的时候，是否可行
+	else if (directionKey == RIGHT)
+	{
+		x = moduleCube->right/CUBE_WIDTH - 1;
+		if (x >= arraySizeColumn)
+		{
+			return 0;
+		}
+
+		if (moduleCube->type == MODULE_TYPE_SQUARE)
+		{
+			canGoOn = map[x + 1][y] == 0 && map[x + 1][y + 1] == 0;
+		}
+		else if (moduleCube->type == MODULE_TYPE_ONE)
+		{
+			if (moduleCube->direction == DIRECTION_0 || moduleCube->direction == DIRECTION_180)
+			{
+				canGoOn = map[x + 1][y] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_90 || moduleCube->direction == DIRECTION_270)
+			{
+				canGoOn = map[x + 1][y] == 0 && map[x + 1][y + 1] == 0 && map[x + 1][y + 2] == 0 && map[x + 1][y + 3] == 0;
+			}
+		}
+		else if (moduleCube->type == MODULE_TYPE_L)
+		{
+			if (moduleCube->direction == DIRECTION_0)
+			{
+				canGoOn = map[x][y] == 0 && map[x][y + 1] == 0 && map[x + 1][y + 2] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_90)
+			{
+				canGoOn = map[x + 1][y] == 0 && map[x - 1][y + 1] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_180)
+			{
+				canGoOn = map[x + 1][y] == 0 && map[x + 1][y + 1] == 0 && map[x + 1][y + 2] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_270)
+			{
+				canGoOn = map[x + 1][y] == 0 && map[x + 1][y + 1] == 0;
+			}
+		}
+		else if (moduleCube->type == MODULE_TYPE_REL)
+		{
+			if (moduleCube->direction == DIRECTION_0)
+			{
+				canGoOn = map[x+1][y] == 0 && map[x+1][y + 1] == 0 && map[x + 1][y + 2] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_90)
+			{
+				canGoOn = map[x - 1][y] == 0 && map[x + 1][y + 1] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_180)
+			{
+				canGoOn = map[x + 1][y] == 0 && map[x][y + 1] == 0 && map[x][y + 2] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_270)
+			{
+				canGoOn = map[x + 1][y] == 0 && map[x + 1][y + 1] == 0;
+			}
+
+		}
+		else if (moduleCube->type == MODULE_TYPE_STEP)
+		{
+
+			if (moduleCube->direction == DIRECTION_90 || moduleCube->direction == DIRECTION_270)
+			{
+				canGoOn = map[x][y] == 0 && map[x + 1][y + 1] == 0 && map[x + 1][y + 2] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_0 || moduleCube->direction == DIRECTION_180)
+			{
+				canGoOn = map[x + 1][y] == 0 && map[x][y + 1] == 0;
+			}
+		}
+		else if (moduleCube->type == MODULE_TYPE_RESTEP)
+		{
+			if (moduleCube->direction == DIRECTION_90 || moduleCube->direction == DIRECTION_270)
+			{
+				canGoOn = map[x+1][y] == 0 && map[x + 1][y + 1] == 0 && map[x][y + 2] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_0 || moduleCube->direction == DIRECTION_180)
+			{
+				canGoOn = map[x][y] == 0 && map[x+1][y + 1] == 0;
+			}
+		}
+		else if (moduleCube->type == MODULE_TYPE_T)
+		{
+			if (moduleCube->direction == DIRECTION_0)
+			{
+				canGoOn = map[x + 1][y] == 0 && map[x][y + 1] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_90)
+			{
+				canGoOn = map[x+1][y] == 0 && map[x + 1][y + 1] == 0 && map[x+1][y + 2] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_180)
+			{
+				canGoOn = map[x][y] == 0 && map[x + 1][y + 1] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_270)
+			{
+				canGoOn = map[x][y] == 0 && map[x + 1][y + 1] && map[x][y + 2] == 0;
+			}
+		}
+	}
+	
+	return canGoOn;
+}
+
+// 将对应的块位置设置为0
+void resetMap(ModuleCube* moduleCube, int map[][arraySizeRaw]) {
+	int x = moduleCube->left / CUBE_WIDTH;
+	int y = moduleCube->top / CUBE_WIDTH;
+
+	if (moduleCube->type == MODULE_TYPE_SQUARE)
+	{
+		map[x][y] = 0;
+		map[x + 1][y] = 0;
+		map[x][y + 1] = 0;
+		map[x + 1][y + 1] = 0;
+
+	}
+	else if (moduleCube->type == MODULE_TYPE_ONE)
+	{
+		if (moduleCube->direction == DIRECTION_0 || moduleCube->direction == DIRECTION_180)
+		{
+			map[x][y] = 0;
+			map[x + 1][y] = 0;
+			map[x + 2][y] = 0;
+			map[x + 3][y] = 0;
+		}
+		else if (moduleCube->direction == DIRECTION_90 || moduleCube->direction == DIRECTION_270)
+		{
+			map[x][y] = 0;
+			map[x][y + 1] = 0;
+			map[x][y + 2] = 0;
+			map[x][y + 3] = 0;
+		}
+	}
+	else if (moduleCube->type == MODULE_TYPE_L)
+	{
+		if (moduleCube->direction == DIRECTION_0)
+		{
+			map[x][y] = 0;
+			map[x][y + 1] = 0;
+			map[x][y + 2] = 0;
+			map[x + 1][y + 2] = 0;
+		}
+		else if (moduleCube->direction == DIRECTION_90)
+		{
+			map[x][y] = 0;
+			map[x][y + 1] = 0;
+			map[x + 1][y] = 0;
+			map[x + 2][y] = 0;
+		}
+		else if (moduleCube->direction == DIRECTION_180)
+		{
+			map[x][y] = 0;
+			map[x + 1][y] = 0;
+			map[x + 1][y + 1] = 0;
+			map[x + 1][y + 2] = 0;
+		}
+		else if (moduleCube->direction == DIRECTION_270)
+		{
+			map[x][y + 1] = 0;
+			map[x + 1][y + 1] = 0;
+			map[x + 2][y + 1] = 0;
+			map[x + 2][y] = 0;
+		}
+	}
+	else if (moduleCube->type == MODULE_TYPE_REL)
+	{
+		if (moduleCube->direction == DIRECTION_0)
+		{
+			map[x + 1][y] = 0;
+			map[x + 1][y + 1] = 0;
+			map[x + 1][y + 2] = 0;
+			map[x][y + 2] = 0;
+		}
+		else if (moduleCube->direction == DIRECTION_90)
+		{
+			map[x][y] = 0;
+			map[x][y + 1] = 0;
+			map[x + 1][y + 1] = 0;
+			map[x + 2][y + 1] = 0;
+		}
+		else if (moduleCube->direction == DIRECTION_180)
+		{
+			map[x][y] = 0;
+			map[x][y + 1] = 0;
+			map[x][y + 2] = 0;
+			map[x + 1][y] = 0;
+		}
+		else if (moduleCube->direction == DIRECTION_270)
+		{
+			map[x][y] = 0;
+			map[x + 1][y] = 0;
+			map[x + 2][y] = 0;
+			map[x + 2][y + 1] = 0;
+		}
+	}
+	else if (moduleCube->type == MODULE_TYPE_STEP)
+	{
+
+		if (moduleCube->direction == DIRECTION_90 || moduleCube->direction == DIRECTION_270)
+		{
+			map[x][y] = 0;
+			map[x][y + 1] = 0;
+			map[x + 1][y + 1] = 0;
+			map[x + 1][y + 2] = 0;
+		}
+		else if (moduleCube->direction == DIRECTION_0 || moduleCube->direction == DIRECTION_180)
+		{
+			map[x + 1][y] = 0;
+			map[x + 2][y] = 0;
+			map[x][y + 1] = 0;
+			map[x + 1][y + 1] = 0;
+		}
+	}
+	else if (moduleCube->type == MODULE_TYPE_RESTEP)
+	{
+
+		if (moduleCube->direction == DIRECTION_90 || moduleCube->direction == DIRECTION_270)
+		{
+			map[x][y + 2] = 0;
+			map[x][y + 1] = 0;
+			map[x + 1][y + 1] = 0;
+			map[x + 1][y] = 0;
+		}
+		else if (moduleCube->direction == DIRECTION_0 || moduleCube->direction == DIRECTION_180)
+		{
+			map[x + 1][y] = 0;
+			map[x][y] = 0;
+			map[x + 2][y + 1] = 0;
+			map[x + 1][y + 1] = 0;
+		}
+	}
+	else if (moduleCube->type == MODULE_TYPE_T)
+	{
+		if (moduleCube->direction == DIRECTION_0)
+		{
+			map[x][y] = 0;
+			map[x + 1][y] = 0;
+			map[x + 2][y] = 0;
+			map[x + 1][y + 1] = 0;
+		}
+		else if (moduleCube->direction == DIRECTION_90) {
+			map[x][y + 1] = 0;
+			map[x + 1][y] = 0;
+			map[x + 1][y + 1] = 0;
+			map[x + 1][y + 2] = 0;
+		}
+		else if (moduleCube->direction == DIRECTION_180)
+		{
+			map[x + 1][y] = 0;
+			map[x][y + 1] = 0;
+			map[x + 1][y + 1] = 0;
+			map[x + 2][y + 1] = 0;
+		}
+		else if (moduleCube->direction == DIRECTION_270)
+		{
+			map[x][y] = 0;
+			map[x][y + 1] = 0;
+			map[x][y + 2] = 0;
+			map[x + 1][y + 1] = 0;
+		}
+	}
 }
 
 // 清除原来的模块,一个moduleCube是由四个小方块组成的，所以清除的时候，就逐个的清理掉四个小方块。
@@ -400,18 +995,24 @@ void drawModule(ModuleCube* moduleCube)
 }
 
 // 移动模块
-void moveModule(ModuleCube* moduleCube, int directionKey) {
-	cleanModuleCube(moduleCube);
-	if (directionKey == DOWN) {
-		moduleCube->gravity_y += CUBE_WIDTH;
-		moduleCube->top += CUBE_WIDTH;
-		moduleCube->bottom += CUBE_WIDTH;
-	}
+void moveModule(ModuleCube* moduleCube, int directionKey, int map[][arraySizeRaw]) {
+	//cleanModuleCube(moduleCube);
+	/*
 	else if (directionKey == UP)
 	{
 		moduleCube->gravity_y -= CUBE_WIDTH;
 		moduleCube->top -= CUBE_WIDTH;
 		moduleCube->bottom -= CUBE_WIDTH;
+	}*/
+	if (!checkCanMove(moduleCube, map, directionKey))
+	{
+		// 不能再移动了
+		return;
+	}
+	if (directionKey == DOWN) {
+		moduleCube->gravity_y += CUBE_WIDTH;
+		moduleCube->top += CUBE_WIDTH;
+		moduleCube->bottom += CUBE_WIDTH;
 	}
 	else if (directionKey == LEFT)
 	{
@@ -428,13 +1029,20 @@ void moveModule(ModuleCube* moduleCube, int directionKey) {
 }
 
 // 旋转模块
-void rotateModule(ModuleCube* moduleCube)
+void rotateModule(ModuleCube* moduleCube, int map[][arraySizeRaw])
 {
 
 	// 先清理掉原来的模块
-	cleanModuleCube(moduleCube);
+	/*cleanModuleCube(moduleCube);*/
 	// 这边的方案是先判断类型再判断角度，或者反过来判断也是可以的
 	// 角度是直接设置的，每次旋转都是按照顺时针旋转90度
+	// 判断能否旋转
+	//bool canRotate = checkCanRotate(moduleCube, map);
+	/*if (!canRotate)
+	{
+		return;
+	}*/
+
 	moduleCube->direction += 1;
 	moduleCube->direction %= 4;
 	if (moduleCube->type == MODULE_TYPE_SQUARE)
@@ -644,56 +1252,182 @@ void rotateModule(ModuleCube* moduleCube)
 	if (moduleCube->left < -CUBE_WIDTH)
 	{
 		// 超出了左边界两个像方块长度
-		moveModule(moduleCube, RIGHT);
-		moveModule(moduleCube, RIGHT);
+		moveModule(moduleCube, RIGHT, map);
+		moveModule(moduleCube, RIGHT, map);
 	}
 	else if (moduleCube->left < 0)
 	{
 		// 超出了左边界一个小方块长度
-		moveModule(moduleCube, RIGHT);
+		moveModule(moduleCube, RIGHT, map);
 	}
 	
 	if (moduleCube->right > WINDOW_WIDTH + CUBE_WIDTH)
 	{
 		 // 超出了右边界两个小方块长度
-		moveModule(moduleCube, LEFT);
-		moveModule(moduleCube, LEFT);
+		moveModule(moduleCube, LEFT, map);
+		moveModule(moduleCube, LEFT, map);
 	}
 	else if (moduleCube->right > WINDOW_WIDTH)
 	{
 		// 超出了右边界一个小方块
-		moveModule(moduleCube, LEFT);
+		moveModule(moduleCube, LEFT, map);
 	}
 
 	// 上边界可以不用处理的
 	if (moduleCube->top < -CUBE_WIDTH)
 	{
 		// 超出了右边界两个小方块长度
-		moveModule(moduleCube, DOWN);
-		moveModule(moduleCube, DOWN);
+		moveModule(moduleCube, DOWN, map);
+		moveModule(moduleCube, DOWN, map);
 	}
 	else if (moduleCube->top < 0)
 	{
 		// 超出了右边界一个小方块
-		moveModule(moduleCube, DOWN);
+		moveModule(moduleCube, DOWN, map);
 	}
 
 	// 下边界判断
 	if (moduleCube->bottom > WINDOW_HIGH + CUBE_WIDTH)
 	{
 		// 超出了右边界两个小方块长度
-		moveModule(moduleCube, UP);
-		moveModule(moduleCube, UP);
+		moveModule(moduleCube, UP, map);
+		moveModule(moduleCube, UP, map);
 	}
 	else if (moduleCube->bottom > WINDOW_HIGH)
 	{
-		moveModule(moduleCube, UP);
+		moveModule(moduleCube, UP, map);
 	}
+
 }
 
-// 初始化模块
-ModuleCube* initModule(int type, int direction, int gravity_x, int gravity_y)
+// 检查是否可以旋转
+bool checkCanRotate(ModuleCube* moduleCube, int map[][arraySizeRaw]) {
+	int x = moduleCube->left / CUBE_WIDTH;
+	int y = moduleCube->top / CUBE_WIDTH;
+	// 先把数组中的数据清0
+	resetMap(moduleCube, map);
+	bool canGoOn = 0;
+
+	// 复制临时模块
+	ModuleCube* tmpModule = (ModuleCube*)malloc(sizeof(ModuleCube));
+	memset(tmpModule, 0x00, sizeof(ModuleCube));
+
+	*tmpModule = *moduleCube;
+
+	// 旋转临时模块
+	rotateModule(tmpModule, map);
+
+	// 下面是判断旋转后的模块和当前地图是否有冲突
+	if (tmpModule->type == MODULE_TYPE_SQUARE)
+	{
+		canGoOn = 1;
+	}
+	else if (tmpModule->type == MODULE_TYPE_ONE)
+	{
+		if (tmpModule->direction == DIRECTION_0 || tmpModule->direction == DIRECTION_180)
+		{
+			canGoOn = map[x][y] == 0 && map[x+1][y]==0 && map[x+2][y] == 0 && map[x+3][y] == 0;
+		}
+		else if (tmpModule->direction == DIRECTION_90 || tmpModule->direction == DIRECTION_270)
+		{
+			canGoOn = map[x][y] == 0 && map[x][y + 1] == 0 && map[x][y + 2] == 0 && map[x][y + 3] == 0;
+		}
+	}
+	else if (tmpModule->type == MODULE_TYPE_L)
+	{
+		if (tmpModule->direction == DIRECTION_0)
+		{
+			canGoOn = map[x][y] == 0 && map[x][y + 1] == 0 && map[x][y + 2] == 0 && map[x+1][y+2] == 0;
+		}
+		else if (tmpModule->direction == DIRECTION_90)
+		{
+			canGoOn = map[x][y] == 0 && map[x+1][y] == 0 && map[x+2][y] == 0 && map[x][y + 1] == 0;
+		}
+		else if (tmpModule->direction == DIRECTION_180)
+		{
+			canGoOn = map[x][y] == 0 && map[x+1][y] == 0 && map[x+1][y+1] == 0&& map[x+1][y + 2] == 0;
+		}
+		else if (tmpModule->direction == DIRECTION_270)
+		{
+			canGoOn = map[x][y+1] == 0 && map[x + 1][y + 1] == 0 && map[x+2][y+1] == 0 && map[x+2][y] == 0;
+		}
+	}
+	else if (tmpModule->type == MODULE_TYPE_REL)
+	{
+		if (tmpModule->direction == DIRECTION_0)
+		{
+			canGoOn = map[x+1][y] == 0 && map[x+1][y + 1] == 0 && map[x+1][y + 2] == 0 && map[x][y + 2] == 0;
+		}
+		else if (tmpModule->direction == DIRECTION_90)
+		{
+			canGoOn = map[x][y] == 0 && map[x][y + 1] == 0 && map[x + 1][y+1] == 0 && map[x+2][y + 1] == 0;
+		}
+		else if (tmpModule->direction == DIRECTION_180)
+		{
+			canGoOn = map[x][y] == 0 && map[x + 1][y] == 0 && map[x][y+1] == 0 && map[x][y + 2] == 0;
+		}
+		else if (tmpModule->direction == DIRECTION_270)
+		{
+			canGoOn = map[x][y] == 0 && map[x + 1][y] == 0 && map[x + 2][y] == 0 && map[x + 2][y+1] == 0;
+		}
+	}
+	else if (tmpModule->type == MODULE_TYPE_STEP)
+	{
+
+		if (tmpModule->direction == DIRECTION_0 || tmpModule->direction == DIRECTION_180)
+		{
+			canGoOn = map[x][y+1] == 0 && map[x+1][y + 1] == 0 && map[x+1][y]&& map[x][y + 2] == 0;
+		}
+		else if (tmpModule->direction == DIRECTION_90 || tmpModule->direction == DIRECTION_270)
+		{
+			canGoOn = map[x][y] == 0 && map[x][y + 1] == 0 && map[x+1][y+1] == 0 && map[x+1][y+2]==0;
+		}
+	}
+	else if (tmpModule->type == MODULE_TYPE_RESTEP)
+	{
+		if (tmpModule->direction == DIRECTION_0 || tmpModule->direction == DIRECTION_180)
+		{
+			canGoOn = map[x][y] == 0 && map[x + 1][y] == 0 && map[x+1][y+1] == 0 && map[x + 2][y + 1] == 0;
+		}
+		else if (tmpModule->direction == DIRECTION_90 || tmpModule->direction == DIRECTION_270)
+		{
+			canGoOn = map[x][y+1] == 0 && map[x][y+2] == 0 && map[x + 1][y] == 0 && map[x + 1][y + 1] == 0;
+		}
+	}
+	else if (tmpModule->type == MODULE_TYPE_T)
+	{
+		if (tmpModule->direction == DIRECTION_0)
+		{
+			canGoOn = map[x][y] == 0 && map[x+1][y] == 0 && map[x+2][y] == 0 && map[x+1][y+1] ==0;
+		}
+		else if (tmpModule->direction == DIRECTION_90)
+		{
+			canGoOn = map[x][y+1] == 0 && map[x + 1][y] == 0 && map[x+1][y + 1] == 0&&map[x+1][y+2] == 0;
+		}
+		else if (tmpModule->direction == DIRECTION_180)
+		{
+			canGoOn = map[x+1][y] == 0 && map[x][y + 1] == 0 && map[x+1][y+1] == 0 && map[x+2][y+1] == 0;
+		}
+		else if (tmpModule->direction == DIRECTION_270)
+		{
+			canGoOn = map[x][y] == 0 && map[x][y + 1] == 0 && map[x][y + 2] == 0 && map[x+1][y+1] == 0;
+		}
+	}
+	if (!canGoOn) 
+	{
+		// 还原原来的map数据
+		updateMap(moduleCube, map);
+	}
+
+	free(tmpModule);
+	return canGoOn;
+}
+
+// 初始化模块, map为方块对应的bool地图
+ModuleCube* initModule(int gravity_x, int gravity_y, int map[][arraySizeRaw])
 {
+	int type = rand() % 7 + 1;
+	int direction = rand() % 4;
 	ModuleCube* moduleCube = (ModuleCube*)malloc(sizeof(ModuleCube));
 	moduleCube->type = type;
 	moduleCube->direction = DIRECTION_0;
@@ -731,26 +1465,163 @@ ModuleCube* initModule(int type, int direction, int gravity_x, int gravity_y)
 
 	for (; moduleCube->direction < direction;)
 	{
-		rotateModule(moduleCube);
+		if (checkCanRotate(moduleCube, map))
+		{
+			rotateModule(moduleCube, map);
+		}
+		
 	}
+
+	updateMap(moduleCube, map);
 
 	return moduleCube;
 }
 
+// 显示对应的地图
+void renderMap(int map[][arraySizeRaw]) {
+	int startX = WINDOW_WIDTH + 10;
+	int startY = 60;
+
+	int i = 0;
+	int j = 0;
+
+	int width = 20;
+	for (i = 0; i < arraySizeColumn; i++)
+	{
+		for (j = 0; j < arraySizeRaw; j++)
+		{
+			RECT r = { startX + width * i, startY + width * j, startX + width * (i + 1), startY + width * (j + 1) };
+			if (map[i][j] == 0)
+			{
+				drawtext(_T("0"), &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+			}
+			else
+			{
+				drawtext(_T("1"), &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+			}
+		}
+	}
+}
+
+// 消除完整的一行或者几行,返回得分
+int fullLineRemove(int map[][arraySizeRaw]) 
+{
+	int winRows = 0;
+	int winRow[arraySizeRaw];
+	for (int i = 0; i < arraySizeRaw; i++)
+	{
+		bool win = 1;
+		for (int j = 0; j < arraySizeColumn; j++)
+		{
+			if (map[j][i] == 0)
+			{
+				win = 0;
+				break;
+			}
+		}
+		if (win)
+		{
+			// 标记哪一行需要消除
+			winRow[winRows] = i;
+			// 统计有多少行是可以消除的
+			winRows++;
+		}
+	}
+
+	// 消除每一行
+	for (int i = 0; i < winRows; i++)
+	{
+		for (int j = 0; j < arraySizeColumn; j++)
+		{
+			int k = winRow[i];
+			while (k > 0)
+			{
+				map[j][k] = map[j][k - 1];
+				if (map[j][k - 1] == 1)
+				{
+					// 画模块
+					if (map[j][k] == 0)
+					{
+						drawCube(j * CUBE_WIDTH + CUBE_WIDTH/2, k*CUBE_WIDTH + CUBE_WIDTH/2);
+					}
+				}
+				else
+				{
+					// 清除模块
+					if (map[j][k] == 1)
+					{
+						clearrectangle(j * CUBE_WIDTH, k * CUBE_WIDTH, (j+1) * CUBE_WIDTH, (k+1) * CUBE_WIDTH);
+					}
+				}
+				k--;
+			}
+		}
+	}
+
+	return winRows;
+}
+
+int score;
+int map[arraySizeColumn][arraySizeRaw] = { 0 };
+bool changed = 0;
+
+// 自动掉落下移
+void threadAutoFall(void *)
+{
+	ModuleCube* module1 = initModule(WINDOW_WIDTH / 2, 0, map);
+	currModuleCube = module1;
+
+	drawModule(currModuleCube);
+
+	int eachGameResult = updateMap(currModuleCube, map);
+	while (eachGameResult != -1)
+	{
+		renderMap(map);
+		// 睡眠1秒
+		Sleep(1000);
+		if (changed)
+		{
+			changed = 0;
+			eachGameResult = updateMap(currModuleCube, map);
+			renderMap(map);
+		}
+		// 循环生成和掉落模块
+		if (eachGameResult == 0)
+		{
+			// 先释放空间
+			free(currModuleCube);
+			// 消除和统计得分
+			score += fullLineRemove(map);
+			// 重新生成掉落模块
+			module1 = initModule(WINDOW_WIDTH / 2, 0, map);
+			currModuleCube = module1;
+		}
+		// 掉落下移
+		resetMap(currModuleCube, map);
+		cleanModuleCube(currModuleCube);
+		moveModule(currModuleCube, DOWN, map);
+		drawModule(currModuleCube);
+		eachGameResult = updateMap(module1, map);
+		
+	}
+
+	RECT gameOverRect = { WINDOW_WIDTH+10,10, WINDOW_WIDTH + 360, 30 };
+	drawtext(_T("GAME OVER! press 'S' key to restart"), &gameOverRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+}
+
 int main()
 {
-	initgraph(WINDOW_WIDTH, WINDOW_HIGH);
-	// 指针数组，专门跟踪二位数组的小方块数据
-	int map[10][20] = {0};
+	initgraph(WINDOW_WIDTH + 400, WINDOW_HIGH);
 
 	// IMAGE img(10, 8);
 	// SetWorkingImage(&img);
+	setlinecolor(0x3300ff);
+	rectangle(0, 0, arraySizeColumn * CUBE_WIDTH, arraySizeRaw * CUBE_WIDTH);
+	setlinecolor(0xFFFFFF);
 
-	int start = 300;
-
-	ModuleCube* module1 = initModule(MODULE_TYPE_T, DIRECTION_90, 300, 60);
-	drawModule(module1);
-
+	// 启动自动掉落线程
+	_beginthread(threadAutoFall, 0, NULL);
+	
 	int key = _getch();
 	/*
 	* 上下左右键移动
@@ -759,30 +1630,26 @@ int main()
 	while (1) {
 		if (key == 224) {
 			key = _getch();
+			cleanModuleCube(currModuleCube);
+			resetMap(currModuleCube, map);
 			if (key == LEFT) {
-				//printf("LEFT\n");
-				moveModule(module1, LEFT);
+				moveModule(currModuleCube, LEFT, map);
 			}
 			else if (key == RIGHT) {
-				//printf("RIGHT\n");
-				moveModule(module1, RIGHT);
+				moveModule(currModuleCube, RIGHT, map);
 			}
-			else if (key == UP)
-			{
-				//printf("UP\n");
-				moveModule(module1, UP);
-			}
-			else if (key == DOWN)
-			{
-				//printf("DOWN\n");
-				moveModule(module1, DOWN);
-			}
-			drawModule(module1);
+			drawModule(currModuleCube);
+			changed = 1;
 		}
 		else if (key == 75) {
+			cleanModuleCube(currModuleCube);
+			resetMap(currModuleCube, map);
 			printf("start to rotate -----------------<");
-			rotateModule(module1);
-			drawModule(module1);
+			rotateModule(currModuleCube, map);
+			drawModule(currModuleCube);
+			changed = 1;
+			/*updateMap(currModuleCube, map);
+			renderMap(map);*/
 		}
 		key = _getch();
 
@@ -791,6 +1658,5 @@ int main()
 	// 按任意键退出
 	//getchar();
 	closegraph();
-	free(module1);
 	return 0;
 }
