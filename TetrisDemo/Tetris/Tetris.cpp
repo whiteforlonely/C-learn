@@ -38,7 +38,7 @@
 #define WINDOW_WIDTH		250	// 游戏界面的宽
 #define WINDOW_HIGH			480 // 游戏界面的高
 
-#define arraySizeRaw		20
+#define arraySizeRaw		23
 #define arraySizeColumn		10
 
 typedef struct
@@ -274,7 +274,7 @@ int updateMap(ModuleCube* moduleCube, int map[][arraySizeRaw])
 		// 可以继续往下走
 		return 1;
 	}
-	else if (y == 1) {
+	else if (y == 3) {
 		// 不可以继续往下走，并且已经到达顶部了，游戏结束
 		return -1;
 	}
@@ -388,7 +388,7 @@ bool checkCanMove(ModuleCube* moduleCube, int map[][arraySizeRaw], int direction
 			}
 			else if (moduleCube->direction == DIRECTION_270)
 			{
-				canGoOn = map[x - 1][y] == 0 && map[x - 1][y + 1] && map[x - 1][y + 2] == 0;
+				canGoOn = map[x - 1][y] == 0 && map[x - 1][y + 1] == 0 && map[x - 1][y + 2] == 0;
 			}
 		}
 	}
@@ -396,7 +396,7 @@ bool checkCanMove(ModuleCube* moduleCube, int map[][arraySizeRaw], int direction
 	else if (directionKey == RIGHT)
 	{
 		x = moduleCube->right/CUBE_WIDTH - 1;
-		if (x >= arraySizeColumn)
+		if (x >= arraySizeColumn-1)
 		{
 			return 0;
 		}
@@ -494,7 +494,7 @@ bool checkCanMove(ModuleCube* moduleCube, int map[][arraySizeRaw], int direction
 			}
 			else if (moduleCube->direction == DIRECTION_270)
 			{
-				canGoOn = map[x][y] == 0 && map[x + 1][y + 1] && map[x][y + 2] == 0;
+				canGoOn = map[x][y] == 0 && map[x + 1][y + 1]==0 && map[x][y + 2] == 0;
 			}
 		}
 	}
@@ -1424,43 +1424,43 @@ bool checkCanRotate(ModuleCube* moduleCube, int map[][arraySizeRaw]) {
 }
 
 // 初始化模块, map为方块对应的bool地图
-ModuleCube* initModule(int gravity_x, int gravity_y, int map[][arraySizeRaw])
+void initModule(ModuleCube* moduleCube, int map[][arraySizeRaw])
 {
-	int type = rand() % 7 + 1;
+	int type = 6;
 	int direction = rand() % 4;
-	ModuleCube* moduleCube = (ModuleCube*)malloc(sizeof(ModuleCube));
+	memset(moduleCube, 0, sizeof(ModuleCube));
 	moduleCube->type = type;
 	moduleCube->direction = DIRECTION_0;
-	moduleCube->gravity_x = gravity_x;
-	moduleCube->gravity_y = gravity_y;
+	moduleCube->gravity_x = WINDOW_WIDTH/2;
+	moduleCube->gravity_y = 40;
 
 	if (type == MODULE_TYPE_SQUARE) {
-		moduleCube->left = gravity_x - CUBE_WIDTH;
-		moduleCube->top = gravity_y - CUBE_WIDTH;
-		moduleCube->right = gravity_x + CUBE_WIDTH;
-		moduleCube->bottom = gravity_y + CUBE_WIDTH;
+		moduleCube->left = moduleCube->gravity_x - CUBE_WIDTH;
+		moduleCube->top = moduleCube->gravity_y - CUBE_WIDTH;
+		moduleCube->right = moduleCube->gravity_x + CUBE_WIDTH;
+		moduleCube->bottom = moduleCube->gravity_y + CUBE_WIDTH;
 	}
 	else if (type == MODULE_TYPE_ONE)
 	{
 		// 初始化1字形
-		moduleCube->left = gravity_x - 2 * CUBE_WIDTH;
-		moduleCube->top = gravity_y - CUBE_WIDTH;
-		moduleCube->right = gravity_x + 2 * CUBE_WIDTH;
-		moduleCube->bottom = gravity_y;
+		moduleCube->left = moduleCube->gravity_x - 2 * CUBE_WIDTH;
+		moduleCube->top = moduleCube->gravity_y - CUBE_WIDTH;
+		moduleCube->right = moduleCube->gravity_x + 2 * CUBE_WIDTH;
+		moduleCube->bottom = moduleCube->gravity_y;
 	}
 	else if (type == MODULE_TYPE_L || type == MODULE_TYPE_REL)
 	{
-		moduleCube->left = gravity_x - CUBE_WIDTH;
-		moduleCube->top = gravity_y - 2 * CUBE_WIDTH;
-		moduleCube->right = gravity_x + CUBE_WIDTH;
-		moduleCube->bottom = gravity_y + CUBE_WIDTH;
+		moduleCube->left = moduleCube->gravity_x - CUBE_WIDTH;
+		moduleCube->top = moduleCube->gravity_y - 2 * CUBE_WIDTH;
+		moduleCube->right = moduleCube->gravity_x + CUBE_WIDTH;
+		moduleCube->bottom = moduleCube->gravity_y + CUBE_WIDTH;
 	}
 	else if (type == MODULE_TYPE_STEP || type == MODULE_TYPE_RESTEP || type == MODULE_TYPE_T)
 	{
-		moduleCube->left = gravity_x - CUBE_WIDTH;
-		moduleCube->top = gravity_y - CUBE_WIDTH;
-		moduleCube->right = gravity_x + 2 * CUBE_WIDTH;
-		moduleCube->bottom = gravity_y + CUBE_WIDTH;
+		moduleCube->left = moduleCube->gravity_x - CUBE_WIDTH;
+		moduleCube->top = moduleCube->gravity_y - CUBE_WIDTH;
+		moduleCube->right = moduleCube->gravity_x + 2 * CUBE_WIDTH;
+		moduleCube->bottom = moduleCube->gravity_y + CUBE_WIDTH;
 	}
 
 	for (; moduleCube->direction < direction;)
@@ -1473,14 +1473,12 @@ ModuleCube* initModule(int gravity_x, int gravity_y, int map[][arraySizeRaw])
 	}
 
 	updateMap(moduleCube, map);
-
-	return moduleCube;
 }
 
 // 显示对应的地图
 void renderMap(int map[][arraySizeRaw]) {
 	int startX = WINDOW_WIDTH + 10;
-	int startY = 60;
+	int startY = 20;
 
 	int i = 0;
 	int j = 0;
@@ -1563,13 +1561,12 @@ int fullLineRemove(int map[][arraySizeRaw])
 
 int score;
 int map[arraySizeColumn][arraySizeRaw] = { 0 };
-bool changed = 0;
 
 // 自动掉落下移
 void threadAutoFall(void *)
 {
-	ModuleCube* module1 = initModule(WINDOW_WIDTH / 2, 0, map);
-	currModuleCube = module1;
+	
+	initModule(currModuleCube, map);
 
 	drawModule(currModuleCube);
 
@@ -1578,30 +1575,21 @@ void threadAutoFall(void *)
 	{
 		renderMap(map);
 		// 睡眠1秒
-		Sleep(1000);
-		if (changed)
-		{
-			changed = 0;
-			eachGameResult = updateMap(currModuleCube, map);
-			renderMap(map);
-		}
+		Sleep(500);
 		// 循环生成和掉落模块
 		if (eachGameResult == 0)
 		{
-			// 先释放空间
-			free(currModuleCube);
 			// 消除和统计得分
 			score += fullLineRemove(map);
 			// 重新生成掉落模块
-			module1 = initModule(WINDOW_WIDTH / 2, 0, map);
-			currModuleCube = module1;
+			initModule(currModuleCube, map);
 		}
 		// 掉落下移
 		resetMap(currModuleCube, map);
 		cleanModuleCube(currModuleCube);
 		moveModule(currModuleCube, DOWN, map);
 		drawModule(currModuleCube);
-		eachGameResult = updateMap(module1, map);
+		eachGameResult = updateMap(currModuleCube, map);
 		
 	}
 
@@ -1616,8 +1604,10 @@ int main()
 	// IMAGE img(10, 8);
 	// SetWorkingImage(&img);
 	setlinecolor(0x3300ff);
-	rectangle(0, 0, arraySizeColumn * CUBE_WIDTH, arraySizeRaw * CUBE_WIDTH);
+	rectangle(4, 0, 8+arraySizeColumn * CUBE_WIDTH, arraySizeRaw * CUBE_WIDTH+2);
 	setlinecolor(0xFFFFFF);
+
+	currModuleCube = (ModuleCube*)malloc(sizeof(ModuleCube));
 
 	// 启动自动掉落线程
 	_beginthread(threadAutoFall, 0, NULL);
@@ -1639,7 +1629,9 @@ int main()
 				moveModule(currModuleCube, RIGHT, map);
 			}
 			drawModule(currModuleCube);
-			changed = 1;
+
+			updateMap(currModuleCube, map);
+			renderMap(map);
 		}
 		else if (key == 75) {
 			cleanModuleCube(currModuleCube);
@@ -1647,14 +1639,15 @@ int main()
 			printf("start to rotate -----------------<");
 			rotateModule(currModuleCube, map);
 			drawModule(currModuleCube);
-			changed = 1;
-			/*updateMap(currModuleCube, map);
-			renderMap(map);*/
+
+			updateMap(currModuleCube, map);
+			renderMap(map);
 		}
 		key = _getch();
 
 	}
 
+	free(currModuleCube);
 	// 按任意键退出
 	//getchar();
 	closegraph();
