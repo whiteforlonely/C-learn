@@ -1304,7 +1304,12 @@ void rotateModule(ModuleCube* moduleCube, int map[][arraySizeRaw])
 
 }
 
-// 检查是否可以旋转
+/*
+* 检查是否可以旋转
+* 
+* 主要的思路：
+* 
+*/
 bool checkCanRotate(ModuleCube* moduleCube, int map[][arraySizeRaw]) {
 	
 	// 先把数组中的数据清0
@@ -1568,6 +1573,17 @@ int fullLineRemove(int map[][arraySizeRaw])
 }
 
 int score;
+/*
+* map地图是为了辅助计算方块的各种动作和判断限制方块的各种动作，
+* map地图是一个二维数组，每一个坐标位置都一一对应着游戏中方块对应的界面的一个小方块。
+* map中只有0和1两个值，1代表著对应的游戏界面的位置已经画上了小方块，0代表还是空的，也就是可以移动。
+* 
+* 1. 方块下落的时候，如何知道不能下落。
+* 2. 方块左右移动的时候如何限制不能超出界限。
+* 3. 判断游戏什么时候应该结束。
+* 4. 判断游戏什么时候有得分。
+* 5. 判断模块是否可以旋转。
+*/
 int map[arraySizeColumn][arraySizeRaw] = { 0 };
 
 // 自动掉落下移
