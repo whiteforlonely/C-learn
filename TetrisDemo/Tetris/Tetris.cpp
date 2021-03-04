@@ -35,7 +35,7 @@
 #define MODULE_TYPE_REL		6
 #define MODULE_TYPE_T		7
 
-#define WINDOW_WIDTH		250	// 游戏界面的宽
+#define WINDOW_WIDTH		200	// 游戏界面的宽
 #define WINDOW_HIGH			480 // 游戏界面的高
 
 #define arraySizeRaw		23
@@ -65,8 +65,12 @@ x,y 为小方块的中心坐标
 */
 void drawCube(int x, int y)
 {
-	setfillcolor(BLUE);
-	setfillstyle(BS_HATCHED, HS_DIAGCROSS);
+	setcolor(0x000000);
+	int r = rand() / 100 + 155;
+	int g = rand() / 100 + 155;
+	int b = rand() / 100 + 155;
+	setfillcolor(RGB(r, g, b));
+	setfillstyle(BS_SOLID);
 	fillrectangle(x - CUBE_WIDTH / 2, y - CUBE_WIDTH / 2, x + CUBE_WIDTH / 2, y + CUBE_WIDTH / 2);
 }
 
@@ -274,7 +278,7 @@ int updateMap(ModuleCube* moduleCube, int map[][arraySizeRaw])
 		// 可以继续往下走
 		return 1;
 	}
-	else if (y == 3) {
+	else if (y <= 2) {
 		// 不可以继续往下走，并且已经到达顶部了，游戏结束
 		return -1;
 	}
@@ -1302,8 +1306,7 @@ void rotateModule(ModuleCube* moduleCube, int map[][arraySizeRaw])
 
 // 检查是否可以旋转
 bool checkCanRotate(ModuleCube* moduleCube, int map[][arraySizeRaw]) {
-	int x = moduleCube->left / CUBE_WIDTH;
-	int y = moduleCube->top / CUBE_WIDTH;
+	
 	// 先把数组中的数据清0
 	resetMap(moduleCube, map);
 	bool canGoOn = 0;
@@ -1316,6 +1319,9 @@ bool checkCanRotate(ModuleCube* moduleCube, int map[][arraySizeRaw]) {
 
 	// 旋转临时模块
 	rotateModule(tmpModule, map);
+
+	int x = tmpModule->left / CUBE_WIDTH;
+	int y = tmpModule->top / CUBE_WIDTH;
 
 	// 下面是判断旋转后的模块和当前地图是否有冲突
 	if (tmpModule->type == MODULE_TYPE_SQUARE)
@@ -1376,7 +1382,7 @@ bool checkCanRotate(ModuleCube* moduleCube, int map[][arraySizeRaw]) {
 
 		if (tmpModule->direction == DIRECTION_0 || tmpModule->direction == DIRECTION_180)
 		{
-			canGoOn = map[x][y+1] == 0 && map[x+1][y + 1] == 0 && map[x+1][y]&& map[x][y + 2] == 0;
+			canGoOn = map[x][y+1] == 0 && map[x+1][y + 1] == 0 && map[x+1][y] == 0 && map[x][y + 2] == 0;
 		}
 		else if (tmpModule->direction == DIRECTION_90 || tmpModule->direction == DIRECTION_270)
 		{
@@ -1426,13 +1432,13 @@ bool checkCanRotate(ModuleCube* moduleCube, int map[][arraySizeRaw]) {
 // 初始化模块, map为方块对应的bool地图
 void initModule(ModuleCube* moduleCube, int map[][arraySizeRaw])
 {
-	int type = 6;
+	int type = 3;
 	int direction = rand() % 4;
 	memset(moduleCube, 0, sizeof(ModuleCube));
 	moduleCube->type = type;
 	moduleCube->direction = DIRECTION_0;
 	moduleCube->gravity_x = WINDOW_WIDTH/2;
-	moduleCube->gravity_y = 40;
+	moduleCube->gravity_y = 2 * CUBE_WIDTH;
 
 	if (type == MODULE_TYPE_SQUARE) {
 		moduleCube->left = moduleCube->gravity_x - CUBE_WIDTH;
@@ -1484,6 +1490,7 @@ void renderMap(int map[][arraySizeRaw]) {
 	int j = 0;
 
 	int width = 20;
+	setcolor(WHITE);
 	for (i = 0; i < arraySizeColumn; i++)
 	{
 		for (j = 0; j < arraySizeRaw; j++)
@@ -1534,7 +1541,7 @@ int fullLineRemove(int map[][arraySizeRaw])
 			int k = winRow[i];
 			while (k > 0)
 			{
-				map[j][k] = map[j][k - 1];
+				
 				if (map[j][k - 1] == 1)
 				{
 					// 画模块
@@ -1551,6 +1558,7 @@ int fullLineRemove(int map[][arraySizeRaw])
 						clearrectangle(j * CUBE_WIDTH, k * CUBE_WIDTH, (j+1) * CUBE_WIDTH, (k+1) * CUBE_WIDTH);
 					}
 				}
+				map[j][k] = map[j][k - 1];
 				k--;
 			}
 		}
@@ -1592,7 +1600,7 @@ void threadAutoFall(void *)
 		eachGameResult = updateMap(currModuleCube, map);
 		
 	}
-
+	setcolor(WHITE);
 	RECT gameOverRect = { WINDOW_WIDTH+10,10, WINDOW_WIDTH + 360, 30 };
 	drawtext(_T("GAME OVER! press 'S' key to restart"), &gameOverRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 }
@@ -1604,7 +1612,7 @@ int main()
 	// IMAGE img(10, 8);
 	// SetWorkingImage(&img);
 	setlinecolor(0x3300ff);
-	rectangle(4, 0, 8+arraySizeColumn * CUBE_WIDTH, arraySizeRaw * CUBE_WIDTH+2);
+	rectangle(0, 2, arraySizeColumn * CUBE_WIDTH, arraySizeRaw * CUBE_WIDTH+4);
 	setlinecolor(0xFFFFFF);
 
 	currModuleCube = (ModuleCube*)malloc(sizeof(ModuleCube));
