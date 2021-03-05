@@ -8,17 +8,25 @@
 * 
 */
 
+#define _CRT_SECURE_NO_WARNINGS
+
 #include <iostream>
 #include <graphics.h>
 #include <conio.h>
 #include <malloc.h>
 #include <windows.h>
 #include <process.h>
+#include <atlstr.h>
+#include <mutex>
 
 #define UP				72
 #define DOWN			80
 #define LEFT			75
 #define RIGHT			77
+
+#define ROTATE			75
+#define RESTART			83
+#define ESC				27
 
 #define CUBE_WIDTH		20	// 定义单个方块大小
 
@@ -53,23 +61,59 @@ typedef struct
 	int top;	// 所占据矩形空间顶部位置
 	int right;	// 所占据矩形空间右边位置
 	int bottom;	// 所占据矩形空间底部位置
+
+	// 颜色值
+	int r;
+	int g;
+	int b;		
 } ModuleCube;
 
-ModuleCube* currModuleCube;
+std::mutex m;
+ModuleCube* currModuleCube, *preModuleCube;
+// 当前的分
+int score = 0;
+// 最高得分
+int maxScore = 0;
+bool changed = 0;
+/*
+* map地图是为了辅助计算方块的各种动作和判断限制方块的各种动作，
+* map地图是一个二维数组，每一个坐标位置都一一对应着游戏中方块对应的界面的一个小方块。
+* map中只有0和1两个值，1代表著对应的游戏界面的位置已经画上了小方块，0代表还是空的，也就是可以移动。
+*
+* 1. 方块下落的时候，如何知道不能下落。
+* 2. 方块左右移动的时候如何限制不能超出界限。
+* 3. 判断游戏什么时候应该结束。
+* 4. 判断游戏什么时候有得分。
+* 5. 判断模块是否可以旋转。
+*/
+int map[arraySizeColumn][arraySizeRaw] = { 0 };
 
+void drawCube(int x, int y, COLORREF color);
+void clearCube(int x, int y);
+int updateMap(ModuleCube* moduleCube, int map[][arraySizeRaw]);
+bool checkCanMove(ModuleCube* moduleCube, int map[][arraySizeRaw], int directionKey);
+void resetMap(ModuleCube* moduleCube, int map[][arraySizeRaw]);
+void cleanModuleCube(ModuleCube* moduleCube);
 bool checkCanRotate(ModuleCube* moduleCube, int map[][arraySizeRaw]);
+void drawModule(ModuleCube* moduleCube);
+void moveModule(ModuleCube* moduleCube, int directionKey, int map[][arraySizeRaw]);
+void rotateModule(ModuleCube* moduleCube, int map[][arraySizeRaw]);
+void initModule(ModuleCube* moduleCube, int map[][arraySizeRaw]);
+void renderMap(int map[][arraySizeRaw]);
+int fullLineRemove(int map[][arraySizeRaw]);
+void threadAutoFall(void*);
+void text(TCHAR text, int left, int top, int right, int bottom);
+void restart();
 
 /*
 画小方块
 x,y 为小方块的中心坐标
 */
-void drawCube(int x, int y)
+void drawCube(int x, int y, COLORREF color)
 {
 	setcolor(0x000000);
-	int r = rand() / 100 + 155;
-	int g = rand() / 100 + 155;
-	int b = rand() / 100 + 155;
-	setfillcolor(RGB(r, g, b));
+	
+	setfillcolor(color);
 	setfillstyle(BS_SOLID);
 	fillrectangle(x - CUBE_WIDTH / 2, y - CUBE_WIDTH / 2, x + CUBE_WIDTH / 2, y + CUBE_WIDTH / 2);
 }
@@ -288,6 +332,12 @@ int updateMap(ModuleCube* moduleCube, int map[][arraySizeRaw])
 	}
 }
 
+/*
+* 检查模块是否能够移动，以下情况不能再移动
+* 1. 当移动到最左边
+* 2. 移动到最最右边
+* 3. 旁边有模块挡者
+*/
 bool checkCanMove(ModuleCube* moduleCube, int map[][arraySizeRaw], int directionKey) {
 	int x = moduleCube->left / CUBE_WIDTH;
 	int y = moduleCube->top / CUBE_WIDTH;
@@ -502,11 +552,115 @@ bool checkCanMove(ModuleCube* moduleCube, int map[][arraySizeRaw], int direction
 			}
 		}
 	}
+	// 向下移动的时候，是否可行
+	else if (directionKey == DOWN)
+	{
+		if (moduleCube->bottom/CUBE_WIDTH >= arraySizeRaw)
+		{
+			return 0;
+		}
+
+		if (moduleCube->type == MODULE_TYPE_SQUARE)
+		{
+			canGoOn = map[x][y+2] == 0 && map[x + 1][y + 2] == 0;
+		}
+		else if (moduleCube->type == MODULE_TYPE_ONE)
+		{
+			if (moduleCube->direction == DIRECTION_0 || moduleCube->direction == DIRECTION_180)
+			{
+				canGoOn = map[x][y + 1] == 0 && map[x + 1][y + 1] == 0 && map[x + 2][y + 1] == 0 && map[x + 3][y + 1] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_90 || moduleCube->direction == DIRECTION_270)
+			{
+				canGoOn = map[x][y + 4] == 0;
+			}
+		}
+		else if (moduleCube->type == MODULE_TYPE_L)
+		{
+			if (moduleCube->direction == DIRECTION_0)
+			{
+				canGoOn = map[x][y + 3] == 0 && map[x + 1][y + 3] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_90)
+			{
+				canGoOn = map[x][y + 2] == 0 && map[x + 1][y + 1] == 0 && map[x + 2][y + 1] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_180)
+			{
+				canGoOn = map[x][y + 1] == 0 && map[x + 1][y + 3] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_270)
+			{
+				canGoOn = map[x][y + 2] == 0 && map[x + 1][y + 2] == 0 && map[x + 2][y + 2] == 0;
+			}
+		}
+		else if (moduleCube->type == MODULE_TYPE_REL)
+		{
+			if (moduleCube->direction == DIRECTION_0)
+			{
+				canGoOn = map[x][y + 3] == 0 && map[x + 1][y + 3] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_90)
+			{
+				canGoOn = map[x][y + 2] == 0 && map[x + 1][y + 2] == 0 && map[x + 2][y + 2] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_180)
+			{
+				canGoOn = map[x][y + 3] == 0 && map[x + 1][y + 1] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_270)
+			{
+				canGoOn = map[x][y + 1] == 0 && map[x + 1][y + 1] == 0 && map[x + 2][y + 2] == 0;
+			}
+		}
+		else if (moduleCube->type == MODULE_TYPE_STEP)
+		{
+
+			if (moduleCube->direction == DIRECTION_90 || moduleCube->direction == DIRECTION_270)
+			{
+				canGoOn = map[x][y + 2] == 0 && map[x + 1][y + 3] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_0 || moduleCube->direction == DIRECTION_180)
+			{
+				canGoOn = map[x][y + 2] == 0 && map[x + 1][y + 2] == 0 && map[x + 2][y + 1] == 0;
+			}
+		}
+		else if (moduleCube->type == MODULE_TYPE_RESTEP)
+		{
+
+			if (moduleCube->direction == DIRECTION_90 || moduleCube->direction == DIRECTION_270)
+			{
+				canGoOn = map[x][y + 3] == 0 && map[x + 1][y + 2] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_0 || moduleCube->direction == DIRECTION_180)
+			{
+				canGoOn = map[x][y + 1] == 0 && map[x + 1][y + 2] == 0 && map[x + 2][y + 2] == 0;
+			}
+		}
+		else if (moduleCube->type == MODULE_TYPE_T)
+		{
+			if (moduleCube->direction == DIRECTION_0)
+			{
+				canGoOn = map[x][y + 1] == 0 && map[x + 1][y + 2] == 0 && map[x + 2][y + 1] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_90) {
+				canGoOn = map[x][y + 2] == 0 && map[x + 1][y + 3] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_180)
+			{
+				canGoOn = map[x][y + 2] == 0 && map[x + 1][y + 2] == 0 && map[x + 2][y + 2] == 0;
+			}
+			else if (moduleCube->direction == DIRECTION_270)
+			{
+				canGoOn = map[x][y + 3] == 0 && map[x + 1][y + 2] == 0;
+			}
+		}
+	}
 	
 	return canGoOn;
 }
 
-// 将对应的块位置设置为0
+// 将对应的模块在地图中对应的位置值设置为0
 void resetMap(ModuleCube* moduleCube, int map[][arraySizeRaw]) {
 	int x = moduleCube->left / CUBE_WIDTH;
 	int y = moduleCube->top / CUBE_WIDTH;
@@ -791,17 +945,18 @@ direction为各模块的角度
 */
 void drawModule(ModuleCube* moduleCube)
 {
+	COLORREF color = RGB(moduleCube->r, moduleCube->g, moduleCube->b);
 	if (moduleCube->type == MODULE_TYPE_SQUARE)
 	{
 		//画正方形，因为正方形是不管怎么旋转都是一样的，所以较为简单
 		// 画左上方的小方块
-		drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2);
+		drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2, color);
 		// 画右上方的小方块
-		drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2);
+		drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2, color);
 		// 画左下方的小方块
-		drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH);
+		drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH, color);
 		// 画右下方的小方块
-		drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH);
+		drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH, color);
 	}
 	else if (moduleCube->type == MODULE_TYPE_ONE)
 	{
@@ -810,25 +965,25 @@ void drawModule(ModuleCube* moduleCube)
 		{
 			// 横着的'一'
 			// 左到右第一个块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2, color);
 			// 第二个块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2, color);
 			// 第三个块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2, color);
 			// 第四个块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + 3 * CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + 3 * CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2, color);
 		}
 		else
 		{
 			// 竖着的'1'
 			// 从上到下第一块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2, color);
 			// 第二个块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH, color);
 			// 第三个块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, color);
 			// 第四个块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + 3 * CUBE_WIDTH);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + 3 * CUBE_WIDTH, color);
 		}
 	}
 	else if (moduleCube->type == MODULE_TYPE_STEP)
@@ -836,24 +991,24 @@ void drawModule(ModuleCube* moduleCube)
 		// 画台阶型，也是有两种形态
 		if (moduleCube->direction == DIRECTION_0 || moduleCube->direction == DIRECTION_180) {
 			// 左到右上台阶，从下到上，左到右，第一块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->bottom - CUBE_WIDTH / 2 );
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->bottom - CUBE_WIDTH / 2, color);
 			// 第二块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->bottom - CUBE_WIDTH / 2);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->bottom - CUBE_WIDTH / 2, color);
 			// 第三块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2, color);
 			// 第四块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2, color);
 		}
 		else
 		{
 			// 左高右底闪电，从下到上，左到右，第一块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH, color);
 			// 第二块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2, color);
 			// 第三块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, color);
 			// 第四块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH, color);
 		}
 	}
 	else if (moduleCube->type == MODULE_TYPE_RESTEP)
@@ -861,24 +1016,24 @@ void drawModule(ModuleCube* moduleCube)
 		// TODO 画反台阶，也是两种形态
 		if (moduleCube->direction == DIRECTION_0 || moduleCube->direction == DIRECTION_180) {
 			// 左到右下台阶，从下到上，左到右，第一块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2, color);
 			// 第二块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->bottom - CUBE_WIDTH / 2);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->bottom - CUBE_WIDTH / 2, color);
 			// 第三块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2, color);
 			// 第四块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH, color);
 		}
 		else
 		{
 			// 左底右高闪电，从下到上，左到右，第一块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, color);
 			// 第二块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH, color);
 			// 第三块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH, color);
 			// 第四块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2, color);
 		}
 	}
 	else if (moduleCube->type == MODULE_TYPE_L)
@@ -888,46 +1043,46 @@ void drawModule(ModuleCube* moduleCube)
 		{
 			// 正L型
 			// 从左到右，上到下，第一块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2, color);
 			// 第二块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH, color);
 			// 第三块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, color);
 			// 第四块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, color);
 		}
 		else if (moduleCube->direction == DIRECTION_90)
 		{
 			// 从左到右，上到下 第一块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2, color);
 			// 第二块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH, color);
 			// 第三块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2, color);
 			// 第四块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2, color);
 		}
 		else if (moduleCube->direction == DIRECTION_180)
 		{
 			// 第一块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2, color);
 			// 第二块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2, color);
 			// 第三块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH, color);
 			// 第四块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, color);
 		}
 		else if (moduleCube->direction == DIRECTION_270)
 		{
 			// 从左到右，从上到下，第一块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH, color);
 			// 第二块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH, color);
 			// 第三块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2, color);
 			// 第四块
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH, color);
 		}
 	}
 	else if (moduleCube->type == MODULE_TYPE_REL)
@@ -936,31 +1091,31 @@ void drawModule(ModuleCube* moduleCube)
 		if (moduleCube->direction == DIRECTION_0)
 		{
 			// 从上到下， 左到右
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH);
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2);
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH);
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, color);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2, color);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH, color);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, color);
 		}
 		else if (moduleCube->direction == DIRECTION_90)
 		{
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2);
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH);
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH);
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2, color);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH, color);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH, color);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH, color);
 		}
 		else if (moduleCube->direction == DIRECTION_180)
 		{
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2);
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH);
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH);
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2, color);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH, color);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, color);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2, color);
 		}
 		else if (moduleCube->direction == DIRECTION_270)
 		{
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2);
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2);
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2);
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2, color);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2, color);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2, color);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH, color);
 		}
 	}
 	else if (moduleCube->type == MODULE_TYPE_T)
@@ -969,33 +1124,71 @@ void drawModule(ModuleCube* moduleCube)
 		if (moduleCube->direction == DIRECTION_0)
 		{
 			// 从上到下， 左到右
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2);
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2);
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2);
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2, color);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2, color);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2, color);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH, color);
 		}
 		else if (moduleCube->direction == DIRECTION_90)
 		{
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH);
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2);
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH);
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH, color);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2, color);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH, color);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, color);
 		}
 		else if (moduleCube->direction == DIRECTION_180)
 		{
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2);
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH);
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH);
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2, color);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH, color);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH, color);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH, color);
 		}
 		else if (moduleCube->direction == DIRECTION_270)
 		{
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2);
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH);
-			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH);
-			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2, color);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH, color);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2, moduleCube->top + CUBE_WIDTH / 2 + 2 * CUBE_WIDTH, color);
+			drawCube(moduleCube->left + CUBE_WIDTH / 2 + CUBE_WIDTH, moduleCube->top + CUBE_WIDTH / 2 + CUBE_WIDTH, color);
 		}
 	}
+}
+
+void drawPreModule(ModuleCube* moduleCube)
+{
+	int deltaX = WINDOW_WIDTH / 2 + 200;
+	int deltaY = WINDOW_HIGH / 2 - 20;
+	// 初始哈预览模块的位置
+	moduleCube->left += deltaX;
+	moduleCube->right += deltaX;
+	moduleCube->top += deltaY;
+	moduleCube->bottom += deltaY;
+
+	drawModule(moduleCube);
+
+	// 回复原来的module的位置
+	moduleCube->left -= deltaX;
+	moduleCube->right -= deltaX;
+	moduleCube->top -= deltaY;
+	moduleCube->bottom -= deltaY;
+}
+
+void cleanPreModule(ModuleCube* moduleCube)
+{
+	int deltaX = WINDOW_WIDTH / 2 + 200;
+	int deltaY = WINDOW_HIGH / 2 - 20;
+	// 初始哈预览模块的位置
+	moduleCube->left += deltaX;
+	moduleCube->right += deltaX;
+	moduleCube->top += deltaY;
+	moduleCube->bottom += deltaY;
+
+	cleanModuleCube(moduleCube);
+
+	// 回复原来的module的位置
+	moduleCube->left -= deltaX;
+	moduleCube->right -= deltaX;
+	moduleCube->top -= deltaY;
+	moduleCube->bottom -= deltaY;
 }
 
 // 移动模块
@@ -1435,15 +1628,18 @@ bool checkCanRotate(ModuleCube* moduleCube, int map[][arraySizeRaw]) {
 }
 
 // 初始化模块, map为方块对应的bool地图
-void initModule(ModuleCube* moduleCube, int map[][arraySizeRaw])
+void initModule(ModuleCube* moduleCube)
 {
-	int type = 3;
+	int type = rand() % 7 + 1;
 	int direction = rand() % 4;
 	memset(moduleCube, 0, sizeof(ModuleCube));
 	moduleCube->type = type;
 	moduleCube->direction = DIRECTION_0;
 	moduleCube->gravity_x = WINDOW_WIDTH/2;
 	moduleCube->gravity_y = 2 * CUBE_WIDTH;
+	moduleCube->r = rand() % 56 + 200;
+	moduleCube->g = rand() % 56 + 200;
+	moduleCube->b = rand() % 56 + 200;
 
 	if (type == MODULE_TYPE_SQUARE) {
 		moduleCube->left = moduleCube->gravity_x - CUBE_WIDTH;
@@ -1483,10 +1679,9 @@ void initModule(ModuleCube* moduleCube, int map[][arraySizeRaw])
 		
 	}
 
-	updateMap(moduleCube, map);
 }
 
-// 显示对应的地图
+// 显示对应的地图, 为了方便测试的时候跟踪数据使用
 void renderMap(int map[][arraySizeRaw]) {
 	int startX = WINDOW_WIDTH + 10;
 	int startY = 20;
@@ -1552,7 +1747,7 @@ int fullLineRemove(int map[][arraySizeRaw])
 					// 画模块
 					if (map[j][k] == 0)
 					{
-						drawCube(j * CUBE_WIDTH + CUBE_WIDTH/2, k*CUBE_WIDTH + CUBE_WIDTH/2);
+						drawCube(j * CUBE_WIDTH + CUBE_WIDTH/2, k*CUBE_WIDTH + CUBE_WIDTH/2, 0xffffff);
 					}
 				}
 				else
@@ -1572,41 +1767,82 @@ int fullLineRemove(int map[][arraySizeRaw])
 	return winRows;
 }
 
-int score;
-/*
-* map地图是为了辅助计算方块的各种动作和判断限制方块的各种动作，
-* map地图是一个二维数组，每一个坐标位置都一一对应着游戏中方块对应的界面的一个小方块。
-* map中只有0和1两个值，1代表著对应的游戏界面的位置已经画上了小方块，0代表还是空的，也就是可以移动。
-* 
-* 1. 方块下落的时候，如何知道不能下落。
-* 2. 方块左右移动的时候如何限制不能超出界限。
-* 3. 判断游戏什么时候应该结束。
-* 4. 判断游戏什么时候有得分。
-* 5. 判断模块是否可以旋转。
-*/
-int map[arraySizeColumn][arraySizeRaw] = { 0 };
+// 画字符
+void localText(LPCTSTR txt, int left, int top, int right, int bottom)
+{
+	RECT gameOverRect = { left, top, right, bottom };
+	drawtext(txt, &gameOverRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+}
 
-// 自动掉落下移
+// 更新最高分数
+void updateMaxScoreText(int maxScore)
+{
+	setcolor(WHITE);
+	char data[11];
+	CString cstr = _itoa(maxScore, data, 10);
+	LPCTSTR t = (LPCTSTR)cstr;
+	clearrectangle(WINDOW_WIDTH + 10, 60, WINDOW_WIDTH + 400, 90);
+	localText(t, WINDOW_WIDTH + 10, 60, WINDOW_WIDTH + 400, 90);
+}
+
+// 更新当前的积分
+void updateCurScoreText(int curScore)
+{
+	setcolor(WHITE);
+	char data[11];
+	CString cstr = _itoa(curScore, data, 10);
+	LPCTSTR t = (LPCTSTR)cstr;
+	clearrectangle(WINDOW_WIDTH + 10, 100, WINDOW_WIDTH + 400, 130);
+	localText(t, WINDOW_WIDTH + 10, 100, WINDOW_WIDTH + 400, 130);
+}
+
+// 自动掉落下移线程任务
 void threadAutoFall(void *)
 {
-	
-	initModule(currModuleCube, map);
+
+	// 生成预览模块
+	initModule(preModuleCube);
+	// 初始化复制预览模块
+	*currModuleCube = *preModuleCube;
+	// 重新初始化预览模块
+	cleanPreModule(preModuleCube);
+	initModule(preModuleCube);
+	// 更新初始化模块
+	updateMap(currModuleCube, map);
+	// 画出预览模块
+	drawPreModule(preModuleCube);
 
 	drawModule(currModuleCube);
 
 	int eachGameResult = updateMap(currModuleCube, map);
 	while (eachGameResult != -1)
 	{
-		renderMap(map);
-		// 睡眠1秒
-		Sleep(500);
+		//renderMap(map);
+		
+		m.lock();
+		if (changed)
+		{
+			changed = 0;
+			eachGameResult = updateMap(currModuleCube, map);
+			m.unlock();
+			continue;
+		}
 		// 循环生成和掉落模块
 		if (eachGameResult == 0)
 		{
 			// 消除和统计得分
 			score += fullLineRemove(map);
-			// 重新生成掉落模块
-			initModule(currModuleCube, map);
+			// 更新当前得分
+			updateCurScoreText(score);
+			// 重新初始化模块
+			*currModuleCube = *preModuleCube;
+			// 重新初始化预览模块
+			cleanPreModule(preModuleCube);
+			initModule(preModuleCube);
+			// 更新初始化模块
+			updateMap(currModuleCube, map);
+			// 画出预览模块
+			drawPreModule(preModuleCube);
 		}
 		// 掉落下移
 		resetMap(currModuleCube, map);
@@ -1614,11 +1850,44 @@ void threadAutoFall(void *)
 		moveModule(currModuleCube, DOWN, map);
 		drawModule(currModuleCube);
 		eachGameResult = updateMap(currModuleCube, map);
+		m.unlock();
+		// 睡眠0.5秒
+		Sleep(500);
 		
 	}
 	setcolor(WHITE);
 	RECT gameOverRect = { WINDOW_WIDTH+10,10, WINDOW_WIDTH + 360, 30 };
 	drawtext(_T("GAME OVER! press 'S' key to restart"), &gameOverRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+}
+
+// 重新开始游戏
+void restart() {
+	//重绘方框
+	clearrectangle(0, 0, arraySizeColumn * CUBE_WIDTH + 2, arraySizeRaw * CUBE_WIDTH + 2);
+	clearrectangle(WINDOW_WIDTH + 10, 10, WINDOW_WIDTH + 360, 30);
+	cleanPreModule(preModuleCube);
+	setcolor(0x3300ff);
+	rectangle(0, 0, arraySizeColumn * CUBE_WIDTH + 2, arraySizeRaw * CUBE_WIDTH + 2);
+	// 更新最高分
+	if (score > maxScore)
+	{
+		maxScore = score;
+	}
+	updateMaxScoreText(maxScore);
+	// 更新当前分数
+	score = 0;
+	updateCurScoreText(score);
+	// 预制下一个模块
+
+	// 清空地图
+	for (int i = 0; i < arraySizeColumn; i++)
+	{
+		for (int j = 0; j < arraySizeRaw; j++)
+		{
+			map[i][j] = 0;
+		}
+	}
+	_beginthread(threadAutoFall, 0, NULL);
 }
 
 int main()
@@ -1628,10 +1897,14 @@ int main()
 	// IMAGE img(10, 8);
 	// SetWorkingImage(&img);
 	setlinecolor(0x3300ff);
-	rectangle(0, 2, arraySizeColumn * CUBE_WIDTH, arraySizeRaw * CUBE_WIDTH+4);
+	rectangle(0, 0, arraySizeColumn * CUBE_WIDTH+1, arraySizeRaw * CUBE_WIDTH+1);
 	setlinecolor(0xFFFFFF);
 
 	currModuleCube = (ModuleCube*)malloc(sizeof(ModuleCube));
+	preModuleCube = (ModuleCube*)malloc(sizeof(ModuleCube));
+
+	updateMaxScoreText(maxScore);
+	updateCurScoreText(score);
 
 	// 启动自动掉落线程
 	_beginthread(threadAutoFall, 0, NULL);
@@ -1644,28 +1917,50 @@ int main()
 	while (1) {
 		if (key == 224) {
 			key = _getch();
+			m.lock();
 			cleanModuleCube(currModuleCube);
 			resetMap(currModuleCube, map);
-			if (key == LEFT) {
+			if (key == LEFT) 
+			{
 				moveModule(currModuleCube, LEFT, map);
 			}
-			else if (key == RIGHT) {
+			else if (key == RIGHT) 
+			{
 				moveModule(currModuleCube, RIGHT, map);
+			}
+			else if (key == DOWN)
+			{
+				moveModule(currModuleCube, DOWN, map);
 			}
 			drawModule(currModuleCube);
 
 			updateMap(currModuleCube, map);
-			renderMap(map);
+			//renderMap(map);
+			changed = 1;
+			m.unlock();
 		}
-		else if (key == 75) {
+		else if (key == ROTATE) {
+			// K键旋转
+			m.lock();
 			cleanModuleCube(currModuleCube);
 			resetMap(currModuleCube, map);
-			printf("start to rotate -----------------<");
 			rotateModule(currModuleCube, map);
 			drawModule(currModuleCube);
 
 			updateMap(currModuleCube, map);
-			renderMap(map);
+			//renderMap(map);
+			changed = 1;
+			m.unlock();
+		}
+		else if (key == RESTART)
+		{
+			//重新开始游戏
+			restart();
+		}
+		else if (key == ESC)
+		{
+			// 结束游戏
+			return 0;
 		}
 		key = _getch();
 
